@@ -16,7 +16,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from inference.wm3_env import REPO_ROOT, setup_weathermesh, weathermesh_cwd
+from inference.export import default_forecast_path, save_forecast_netcdf
+from inference.wm3_env import OUTPUTS_DIR, PREPROCESSED_DIR, REPO_ROOT, setup_weathermesh, weathermesh_cwd
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ def load_native_stack(data_dir, source, timestamp, mesh):
     Load one encoder's sample NPZ files into a single (n_lat, n_lon, C) array.
 
     Args:
-        data_dir (Path): Root data directory with neogfs/ and neohres/ trees
+        data_dir (Path): Root with neogfs/ and neohres/ (e.g. data/sample or data/preprocessed)
         source (str): "neogfs" or "neohres"
         timestamp (int): Unix UTC time used in sample filenames
         mesh (LatLonGrid): Matching encoder mesh from model.config.inputs
@@ -83,7 +84,7 @@ def load_sample_input(data_dir, timestamp, meshes, device=None):
     Load WindBorne sample data and assemble both encoder inputs.
 
     Args:
-        data_dir (Path): Directory containing neogfs/ and neohres/
+        data_dir (Path): Root with neogfs/ and neohres/ (e.g. data/sample or data/preprocessed)
         timestamp (int): Unix UTC initialization time
         meshes (list): model.config.inputs — [gfs_mesh, hres_mesh]
         device (torch.device, optional): Defaults to CPU
@@ -140,6 +141,8 @@ def run_inference(model, data, forecast_hours=6, device=None):
         raise RuntimeError(f"Inference failed for {forecast_hours}h forecast: {e}") from e
 
     forecast = outputs[forecast_hours][0]
+    if forecast.ndim == 4 and forecast.shape[0] == 1:
+        forecast = forecast.squeeze(0)
     if torch.isnan(forecast).any():
         raise RuntimeError(f"Forecast contains NaN values at {forecast_hours}h")
 
@@ -161,10 +164,12 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     parser = argparse.ArgumentParser(description="Run WeatherMesh-3 inference on sample data")
-    parser.add_argument("--data-dir", type=Path, default=REPO_ROOT / "data")
+    parser.add_argument("--data-dir", type=Path, default=PREPROCESSED_DIR)
     parser.add_argument("--weights", type=Path, default=REPO_ROOT / "weights" / "WeatherMesh3.pt")
-    parser.add_argument("--timestamp", type=int, default=1741305600)
+    parser.add_argument("--timestamp", type=int, default=1781179200)
     parser.add_argument("--forecast-hours", type=int, default=6)
+    parser.add_argument("--output-dir", type=Path, default=OUTPUTS_DIR)
+    parser.add_argument("--output", type=Path, default=None, help="NetCDF path (default: output-dir/forecast_<ts>_f<lead>.nc)")
     parser.add_argument("--device", type=str, default=None)
     args = parser.parse_args()
 
@@ -176,6 +181,7 @@ def main():
             from model import get_WeatherMesh3
 
             model = get_WeatherMesh3(str(args.weights)).to(device).eval()
+            output_mesh = model.config.outputs[0]
             data = load_sample_input(args.data_dir, args.timestamp, model.config.inputs, device=device)
     except Exception as e:
         raise RuntimeError(f"Failed to prepare model or input: {e}") from e
@@ -189,6 +195,14 @@ def main():
         f"min={finite.min().item():.4f}, max={finite.max().item():.4f}, "
         f"mean={finite.mean().item():.4f}, time={result['inference_seconds']:.2f}s"
     )
+
+    out_path = args.output or default_forecast_path(
+        args.output_dir, args.timestamp, args.forecast_hours
+    )
+    saved = save_forecast_netcdf(
+        y, output_mesh, args.timestamp, args.forecast_hours, out_path
+    )
+    print(f"Saved NetCDF: {saved.resolve()}")
 
 
 if __name__ == "__main__":

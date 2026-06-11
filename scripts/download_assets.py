@@ -13,7 +13,7 @@ def RED(text): return f"\033[91m{text}\033[0m"
 # Default local paths
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WEIGHTS_PATH = REPO_ROOT / "weights" / "WeatherMesh3.pt"
-DATA_DIR = REPO_ROOT / "data"
+SAMPLE_DATA_DIR = REPO_ROOT / "data" / "sample"
 DATA_ZIP = REPO_ROOT / "data.zip"
 
 # Google Drive links for weights and sample data
@@ -115,9 +115,9 @@ def download_assets(weights_url=None, data_url=None):
 
     # Download sample data zip (~400 MB), then extract
     gdown_file(data_url, DATA_ZIP)
-    unzip_data(DATA_ZIP, DATA_DIR)
+    unzip_data(DATA_ZIP, SAMPLE_DATA_DIR)
 
-    verify_assets(WEIGHTS_PATH, DATA_DIR)
+    verify_assets(WEIGHTS_PATH, SAMPLE_DATA_DIR)
 
 if __name__ == "__main__":
     print(MAGENTA("Downloading WeatherMesh-3 assets from Google Drive..."))
