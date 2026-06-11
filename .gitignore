@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 data.zip
 raw_data/
+data/
 
 AGENT.md
 PLANNING.md
