@@ -6,7 +6,7 @@ Usage (from repo root):
     python3 pipeline.py
 
 Requires AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_S3_BUCKET in the environment
-(or in .env). Optional: AWS_DEFAULT_REGION (defaults to us-east-1).
+(or in .env). Optional: AWS_DEFAULT_REGION (defaults to us-east-2).
 """
 
 import json
@@ -143,7 +143,7 @@ def upload_netcdf_to_s3(local_path, timestamp, forecast_hours):
     if not bucket:
         raise RuntimeError("AWS_S3_BUCKET environment variable is not set")
 
-    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-2")
     key = f"forecasts/forecast_{timestamp}_f{int(forecast_hours):03d}.nc"
     client = boto3.client("s3", region_name=region)
     client.upload_file(str(local_path), bucket, key)

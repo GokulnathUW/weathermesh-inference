@@ -20,6 +20,7 @@ import torch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
+from inference.export import denormalize_forecast, reorder_field_lon180
 from inference.inference import load_sample_input, run_inference
 from inference.preprocess import WM3_CORE_SFC_VARS, WM3_EXTRA_SFC_VARS, WM3_PRESSURE_VARS
 from inference.wm3_env import (
@@ -175,25 +176,12 @@ def run_inference_check(processed_dir, timestamp, weights, forecast_hours, devic
 
 
 def save_temp_map(forecast, output_mesh, out_path):
-    if isinstance(forecast, torch.Tensor):
-        forecast = forecast.detach().cpu()
-        if forecast.ndim == 4 and forecast.shape[0] == 1:
-            forecast = forecast.squeeze(0)
-
-    setup_weathermesh()
-    with weathermesh_cwd():
-        with open("constants/normalization.json") as f:
-            norms = json.load(f)
-
-    channel = output_temp_channel(output_mesh)
-    norm_2t = forecast[:, :, channel].numpy()
-    mean = norms["167_2t"]["mean"]
-    std = norms["167_2t"]["std"]
-    temp_k = denorm_2t(norm_2t, mean, std)
+    temp_k = denormalize_forecast(forecast, output_mesh)[..., output_temp_channel(output_mesh)]
     temp_c = temp_k - 273.15
 
     lats = output_mesh.lats
     lons = output_mesh.lons
+    temp_c, lats, lons = reorder_field_lon180(temp_c, lons, lats)
     lon2d, lat2d = np.meshgrid(lons, lats)
 
     out_path = Path(out_path)
@@ -204,7 +192,7 @@ def save_temp_map(forecast, output_mesh, out_path):
     ax.set_title("2m temperature (denormalized forecast, °C)")
     ax.set_xlabel("longitude")
     ax.set_ylabel("latitude")
-    ax.set_xlim(lons.min(), lons.max())
+    ax.set_xlim(-180, 180)
     ax.set_ylim(lats.min(), lats.max())
     fig.colorbar(pcm, ax=ax, label="°C")
     fig.savefig(out_path, dpi=150)

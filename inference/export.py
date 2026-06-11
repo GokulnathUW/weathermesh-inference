@@ -89,6 +89,28 @@ def _as_numpy(forecast):
     return forecast.astype(np.float32)
 
 
+def lon180_sort_indices(lons):
+    """
+    Column indices to sort WM-3 longitude order into monotonic [-180, 180).
+
+    WM-3 stores lons as [0, …, 179.75, -180, …, -0.25], not west-to-east.
+    """
+    lon = np.asarray(lons, dtype=np.float64)
+    lon180 = ((lon + 180.0) % 360.0) - 180.0
+    return np.argsort(lon180), lon180
+
+
+def reorder_field_lon180(field, lons, lats=None):
+    """Reorder a (lat, lon) or (lat, lon, ...) field to monotonic -180..180 longitude."""
+    xi, lon180 = lon180_sort_indices(lons)
+    field = np.asarray(field)
+    reordered = np.take(field, xi, axis=1)
+    lon_out = lon180[xi].astype(np.float32)
+    if lats is None:
+        return reordered, lon_out
+    return reordered, np.asarray(lats, dtype=np.float32), lon_out
+
+
 def denormalize_forecast(normalized, output_mesh):
     """Apply z-score inverse: physical = normalized * std + mean."""
     setup_weathermesh()
@@ -105,14 +127,8 @@ def denormalize_forecast(normalized, output_mesh):
 
 def _to_api_grid(field, lats, lons):
     """Reorder to WindBorne convention: lon in [-180, 180], lat increasing."""
-    lon = np.asarray(lons, dtype=np.float64)
     lat = np.asarray(lats, dtype=np.float64)
-    z = np.asarray(field, dtype=np.float32)
-
-    lon180 = ((lon + 180.0) % 360.0) - 180.0
-    xi = np.argsort(lon180)
-    lon180 = lon180[xi].astype(np.float32)
-    z = z[:, xi]
+    z, lon180 = reorder_field_lon180(field, lons)
 
     if lat[0] > lat[-1]:
         lat = lat[::-1].astype(np.float32)
@@ -245,25 +261,30 @@ def forecast_to_dataset(physical, output_mesh, init_timestamp, forecast_hours):
     pr_block = physical[..., :n_pr].reshape(len(lats), len(lons), n_pr_vars, n_levels)
     pr_block = np.transpose(pr_block, (2, 3, 0, 1))
 
+    _, lats_out, lons_out = reorder_field_lon180(physical[..., 0], lons, lats)
+    xi, _ = lon180_sort_indices(lons)
+
     init_time = datetime.fromtimestamp(int(init_timestamp), tz=timezone.utc)
     valid_time = init_time + timedelta(hours=int(forecast_hours))
 
     data_vars = {}
     for vi, var in enumerate(output_mesh.pressure_vars):
+        pr_sorted = pr_block[vi][:, :, xi]
         data_vars[var] = xr.DataArray(
-            pr_block[vi],
+            pr_sorted,
             dims=("level", "latitude", "longitude"),
-            coords={"level": levels, "latitude": lats, "longitude": lons},
+            coords={"level": levels, "latitude": lats_out, "longitude": lons_out},
             attrs={"units": WM3_UNITS.get(var, "unknown"), "long_name": var},
         )
 
     for si, var in enumerate(output_mesh.sfc_vars):
         if var == "zeropad":
             continue
+        sfc_sorted, _, _ = reorder_field_lon180(physical[..., n_pr + si], lons, lats)
         data_vars[var] = xr.DataArray(
-            physical[..., n_pr + si],
+            sfc_sorted,
             dims=("latitude", "longitude"),
-            coords={"latitude": lats, "longitude": lons},
+            coords={"latitude": lats_out, "longitude": lons_out},
             attrs={"units": WM3_UNITS.get(var, "unknown"), "long_name": var},
         )
 

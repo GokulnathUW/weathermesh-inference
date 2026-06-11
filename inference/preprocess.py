@@ -14,6 +14,44 @@ WM3_SFC_VARS = WM3_CORE_SFC_VARS + WM3_EXTRA_SFC_VARS
 WM3_INPUT_VARS = WM3_PRESSURE_VARS + WM3_SFC_VARS
 
 
+def wm3_longitude_axis(n_lon=1440, resolution=0.25):
+    """WM-3 column order: 0..179.75°E, then -180..-0.25°W (not monotonic west-to-east)."""
+    import numpy as np
+
+    lons = np.arange(0, 359.99, resolution)
+    lons[lons >= 180] -= 360
+    return lons[:n_lon]
+
+
+def grib_lon_to_wm3_indices(grib_lons):
+    """
+    Map GRIB longitude coordinates to WM-3 column indices.
+
+    NOAA GFS cfgrib uses 0..360° columns that are already geographically aligned
+    with WM-3 indices (col 720 = 180°/-180°). If GRIB arrives sorted -180..180,
+    reorder columns so they match WM-3 / WindBorne sample layout.
+    """
+    import numpy as np
+
+    grib_lons = np.asarray(grib_lons, dtype=np.float64)
+    target = wm3_longitude_axis(len(grib_lons))
+    if np.allclose(grib_lons, target, atol=0.01):
+        return np.arange(len(grib_lons), dtype=int)
+    if np.allclose(grib_lons, (target + 360.0) % 360.0, atol=0.01):
+        return np.arange(len(grib_lons), dtype=int)
+
+    idx = np.zeros(len(target), dtype=int)
+    for i, lon_wm in enumerate(target):
+        delta = np.abs(((grib_lons - lon_wm + 180.0) % 360.0) - 180.0)
+        idx[i] = int(np.argmin(delta))
+    return idx
+
+
+def apply_lon_axis(arr, lon_idx, lon_axis):
+    """Reorder one array along its longitude axis."""
+    return np.take(arr, lon_idx, axis=lon_axis)
+
+
 def find_latest_gfs_cycle(s3=None, max_lookback_hours=72):
     """Find the newest GFS f000 cycle on NOAA AWS Open Data."""
     from datetime import datetime, timedelta, timezone
@@ -201,13 +239,18 @@ def extract_gfs_fields(grib_path):
 
     try:
         pr = {}
+        lon_idx = None
         for wm_var in WM3_PRESSURE_VARS:
             da = open_field(field_map[wm_var])
+            if lon_idx is None:
+                lon_idx = grib_lon_to_wm3_indices(da.longitude.values)
             stacked = da.sel(isobaricInhPa=levels_gfs).values.transpose(1, 2, 0)
+            stacked = apply_lon_axis(stacked, lon_idx, lon_axis=1)
             pr[wm_var] = stacked.copy()
         sfc = {}
         for wm_var in WM3_SFC_VARS:
-            sfc[wm_var] = open_field(field_map[wm_var]).values.copy()
+            values = open_field(field_map[wm_var]).values.copy()
+            sfc[wm_var] = apply_lon_axis(values, lon_idx, lon_axis=1)
         pr["129_z"] *= 9.80665
         sfc["45_tcc"] /= 100.0
     except Exception as e:
