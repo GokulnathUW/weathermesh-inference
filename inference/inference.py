@@ -16,7 +16,12 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from inference.export import default_forecast_path, save_forecast_netcdf
+from inference.export import (
+    default_forecast_path,
+    default_windborne_dir,
+    save_forecast_netcdf,
+    save_forecast_windborne_api,
+)
 from inference.wm3_env import OUTPUTS_DIR, PREPROCESSED_DIR, REPO_ROOT, setup_weathermesh, weathermesh_cwd
 
 logger = logging.getLogger(__name__)
@@ -169,7 +174,13 @@ def main():
     parser.add_argument("--timestamp", type=int, default=1781179200)
     parser.add_argument("--forecast-hours", type=int, default=6)
     parser.add_argument("--output-dir", type=Path, default=OUTPUTS_DIR)
-    parser.add_argument("--output", type=Path, default=None, help="NetCDF path (default: output-dir/forecast_<ts>_f<lead>.nc)")
+    parser.add_argument(
+        "--format",
+        choices=("cf", "windborne", "both"),
+        default="both",
+        help="NetCDF layout: cf (single multi-var file), windborne (API one-var-per-file), both",
+    )
+    parser.add_argument("--output", type=Path, default=None, help="CF NetCDF path (default: output-dir/forecast_<ts>_f<lead>.nc)")
     parser.add_argument("--device", type=str, default=None)
     args = parser.parse_args()
 
@@ -199,10 +210,17 @@ def main():
     out_path = args.output or default_forecast_path(
         args.output_dir, args.timestamp, args.forecast_hours
     )
-    saved = save_forecast_netcdf(
-        y, output_mesh, args.timestamp, args.forecast_hours, out_path
-    )
-    print(f"Saved NetCDF: {saved.resolve()}")
+    if args.format in ("cf", "both"):
+        saved = save_forecast_netcdf(
+            y, output_mesh, args.timestamp, args.forecast_hours, out_path
+        )
+        print(f"Saved CF NetCDF: {saved.resolve()}")
+    if args.format in ("windborne", "both"):
+        api_paths = save_forecast_windborne_api(
+            y, output_mesh, args.timestamp, args.forecast_hours, args.output_dir
+        )
+        api_dir = default_windborne_dir(args.output_dir, args.timestamp, args.forecast_hours)
+        print(f"Saved {len(api_paths)} WindBorne API NetCDF files under {api_dir.resolve()}")
 
 
 if __name__ == "__main__":

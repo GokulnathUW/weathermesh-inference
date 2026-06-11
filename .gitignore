@@ -5,6 +5,7 @@ __pycache__/
 data.zip
 data/
 weights/
+outputs/
 
 AGENT.md
 PLANNING.md
