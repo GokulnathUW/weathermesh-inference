@@ -1,0 +1,7 @@
+numpy
+boto3
+python-dotenv
+gdown
+cfgrib
+xarray
+natten==0.17.3

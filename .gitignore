@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+data.zip
+raw_data/
+
+AGENT.md
+PLANNING.md
+resources/
